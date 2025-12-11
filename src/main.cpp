@@ -17,9 +17,9 @@ using std::cout;
 using std::cerr;
 using std::endl;
 
-// ------------- 数据加载 & 查询生成 -------------
+// ------------- Data loading & query generation -------------
 
-// 从二进制文件中读取 uint64_t keys
+// Load uint64_t keys from a binary file
 std::vector<std::uint64_t> load_dataset(const std::string& path, std::size_t max_keys = 0) {
     std::ifstream in(path, std::ios::binary);
     if (!in) {
@@ -40,7 +40,7 @@ std::vector<std::uint64_t> load_dataset(const std::string& path, std::size_t max
     return keys;
 }
 
-// 从 keys 中随机抽样 query（每个 query 都是存在的 key）
+// Sample queries uniformly from existing keys
 std::vector<std::uint64_t> generate_queries(const std::vector<std::uint64_t>& keys,
                                             std::size_t num_queries) {
     std::mt19937_64 rng(42);
@@ -53,7 +53,7 @@ std::vector<std::uint64_t> generate_queries(const std::vector<std::uint64_t>& ke
     return qs;
 }
 
-// ------------- 统计 & benchmark -------------
+// ------------- Stats & benchmarking -------------
 
 struct Stats {
     double mean_ns;
@@ -90,7 +90,7 @@ Stats benchmark_bpt(const std::vector<std::uint64_t>& keys,
         auto t1 = clock::now();
         auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
         latencies.push_back(ns);
-        (void)ok; // 已经有单独的 sanity_check，这里不再检查
+        (void)ok; // sanity is checked separately
     }
     return compute_stats(latencies);
 }
@@ -114,7 +114,7 @@ Stats benchmark_rmi(const std::vector<std::uint64_t>& keys,
     return compute_stats(latencies);
 }
 
-// ------------- 正确性检查 -------------
+// ------------- Sanity checks -------------
 
 void sanity_check(const std::vector<std::uint64_t>& keys,
                   BPTree& bpt,
@@ -122,7 +122,7 @@ void sanity_check(const std::vector<std::uint64_t>& keys,
     std::mt19937_64 rng(123);
     std::uniform_int_distribution<std::size_t> dist(0, keys.size() - 1);
 
-    // 检查 100 个存在的 key
+    // Check 100 random existing keys
     for (int i = 0; i < 100; ++i) {
         std::size_t idx = dist(rng);
         std::uint64_t k = keys[idx];
@@ -139,7 +139,7 @@ void sanity_check(const std::vector<std::uint64_t>& keys,
         }
     }
 
-    // 随便查 100 个“可能不存在”的 key（主要看不会崩）
+    // Probe 100 random non-keys (just to ensure no crashes)
     for (int i = 0; i < 100; ++i) {
         std::size_t idx = dist(rng);
         std::uint64_t k = keys[idx] + 1;
@@ -158,7 +158,7 @@ void sanity_check(const std::vector<std::uint64_t>& keys,
 
 int main() {
     try {
-        // ===== CSV 文件：lookup & build/mem 分开写 =====
+        // ===== CSV output: lookup vs build/memory =====
         std::ofstream csv_lookup("results_lookup.csv");
         csv_lookup << "dataset,index,num_keys,num_leaves,metric,mean_ns,p95_ns,p99_ns\n";
 
@@ -166,7 +166,7 @@ int main() {
         csv_build << "dataset,index,num_keys,num_leaves,build_time_s,mem_bytes\n";
         // =============================================
 
-        std::string base = "data/"; // 相对 /Users/raywang/CIS6500_Project
+        std::string base = "data/"; // relative to project root
 
         std::map<std::string, std::string> datasets = {
             {"books", base + "books_200M_uint64"},
@@ -175,8 +175,8 @@ int main() {
             {"wiki",  base + "wiki_ts_200M_uint64"}
         };
 
-        // 这里改成 1M / 5M / 10M 轮流跑就行
-        std::size_t max_keys    = 100'000'000;   // 你可以改成 1'000'000 或 5'000'000 再跑一遍
+        // Change this to 1M / 5M / 10M as needed
+        std::size_t max_keys    = 100'000'000;   // e.g., 1'000'000 or 5'000'000
         std::size_t num_queries = 100'000;
 
         using clock = std::chrono::high_resolution_clock;
@@ -186,7 +186,7 @@ int main() {
             auto keys = load_dataset(path, max_keys);
             cout << "Loaded " << keys.size() << " keys from " << path << endl;
 
-            // ---- 构建 B+Tree ----
+            // ---- Build B+Tree ----
             BPTree bpt(64);
             auto t0 = clock::now();
             bpt.bulk_load(keys);
@@ -199,13 +199,13 @@ int main() {
                  << " s, approx mem " << mem_b / 1024.0 / 1024.0
                  << " MB" << endl;
 
-            // 写 build/mem 到 CSV（B+Tree，num_leaves 空着）
+            // Write B+Tree build/mem stats (num_leaves left empty)
             csv_build << name << ",BPTree," << keys.size() << ","
-                      << "" << ","                       // num_leaves 为空
+                      << "" << ","
                       << build_time_b << ","
                       << mem_b << "\n";
 
-            // ---- 生成查询，所有 index 共用同一批 queries ----
+            // ---- Generate queries (shared across all indexes) ----
             auto queries = generate_queries(keys, num_queries);
 
             // ---- B+Tree lookup benchmark ----
@@ -215,12 +215,12 @@ int main() {
                  << " ns, p99=" << stats_b.p99_ns << " ns" << endl;
 
             csv_lookup << name << ",BPTree," << keys.size() << ","
-                       << "" << ","              // num_leaves 为空
+                       << "" << ","
                        << "lookup," << stats_b.mean_ns << ","
                        << stats_b.p95_ns << ","
                        << stats_b.p99_ns << "\n";
 
-            // ---- RMI：books / osm 做 leaves sweep，其它 dataset 用 64 ----
+            // ---- RMI: sweep leaves on books/osm, use 64 elsewhere ----
             std::vector<int> leaf_configs;
             if (name == "books" || name == "osm") {
                 leaf_configs = {32, 64, 128, 256};
@@ -243,16 +243,16 @@ int main() {
                      << " s, approx mem " << mem_r / 1024.0
                      << " KB" << endl;
 
-                // 写 build/mem
+                // Write RMI build/mem stats
                 csv_build << name << ",RMI," << keys.size() << ","
                           << leaves << ","
                           << train_time_r << ","
                           << mem_r << "\n";
 
-                // 正确性检查
+                // Sanity check
                 sanity_check(keys, bpt, rmi);
 
-                // lookup benchmark
+                // RMI lookup benchmark
                 auto stats_r = benchmark_rmi(keys, rmi, queries);
 
                 cout << "RMI(" << leaves << ") lookup: mean=" << stats_r.mean_ns

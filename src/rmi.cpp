@@ -46,7 +46,7 @@ void RMI::train(const std::vector<std::uint64_t>& keys) {
         throw std::runtime_error("RMI::train: empty keys");
     }
 
-    // 1) root 模型：所有 keys -> index
+    // Root model: full key -> index mapping
     std::vector<std::uint64_t> x_root(keys);
     std::vector<std::size_t> y_root(n);
     for (std::size_t i = 0; i < n; ++i) y_root[i] = i;
@@ -59,7 +59,7 @@ void RMI::train(const std::vector<std::uint64_t>& keys) {
     root_.end_idx = n;
     root_.max_error = 0;
 
-    // 2) 用 root 的预测给每个 key 分配一个 leaf bucket
+    // Use root prediction to assign keys to leaf buckets
     leaves_.clear();
     leaves_.resize(num_leaves_, {0.0, 0.0, 0, 0, 0});
     std::vector<std::vector<std::size_t>> buckets(num_leaves_);
@@ -80,7 +80,7 @@ void RMI::train(const std::vector<std::uint64_t>& keys) {
         buckets[leaf_id].push_back(i);
     }
 
-    // 3) 每个 leaf 拟合自己的线性模型，并计算 max_error / start / end
+    // For each leaf: fit local model and compute max_error / start / end
     for (std::size_t leaf_id = 0; leaf_id < num_leaves_; ++leaf_id) {
         auto& idxs = buckets[leaf_id];
         if (idxs.empty()) {
@@ -115,7 +115,7 @@ void RMI::train(const std::vector<std::uint64_t>& keys) {
         leaves_[leaf_id].a = a;
         leaves_[leaf_id].b = b;
         leaves_[leaf_id].start_idx = start_idx;
-        leaves_[leaf_id].end_idx = end_idx + 1; // end 是开区间
+        leaves_[leaf_id].end_idx = end_idx + 1; // end is exclusive
         leaves_[leaf_id].max_error = max_err;
     }
 }
@@ -132,7 +132,7 @@ bool RMI::search(const std::vector<std::uint64_t>& keys,
         return static_cast<std::size_t>(p);
     };
 
-    // 1) root 预测 -> leaf id
+    // Root prediction -> leaf id
     long double pred_root = static_cast<long double>(root_.a) *
                             static_cast<long double>(key) +
                             static_cast<long double>(root_.b);
@@ -142,7 +142,6 @@ bool RMI::search(const std::vector<std::uint64_t>& keys,
 
     const auto& leaf = leaves_[leaf_id];
 
-    // 2) leaf 内预测
     long double pred_leaf = static_cast<long double>(leaf.a) *
                             static_cast<long double>(key) +
                             static_cast<long double>(leaf.b);
@@ -157,7 +156,7 @@ bool RMI::search(const std::vector<std::uint64_t>& keys,
         if (right < hi) hi = right;
     }
 
-    // 3) 在 [lo, hi] 范围内二分查找
+    // Local binary search around predicted position
     while (lo <= hi) {
         std::size_t mid = (lo + hi) / 2;
         std::uint64_t mid_key = keys[mid];
